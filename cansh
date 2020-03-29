@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+import os
+import sys
+from time import time, sleep
+import struct
+import argparse
+import contextlib
+import io
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from panda import Panda
+
+ECHO = False
+DEBUG = False
+
+ENABLE_TX_ADDR = 0x75A
+ENABLE_RX_ADDR = 0x75B
+ENABLE_MSGS = [
+  b'\x41\x00\xA5\x00\xAF\xFE\xDE\xAD',
+  b'\x41\x00\xA5\x00',
+  b'\x41\x00\xA5\x00',
+  b'\x41\x00\x00\x00\xAF\xFE\xDE\xAD',
+]
+DISABLE_MSG = b'\x41\x00\x06\x00\x00\x00\x00\x00'
+
+TERM_TX_ADDR=0x72A
+TERM_RX_ADDR=0x72B
+ACTIVATE_MSG = '\x01\x02\x03'
+DEACTIVATE_MSG = '\x01\x02\x10'
+
+def get_keys(code):
+  s1, _ = struct.unpack(">HH", code)
+  k1 = (s1 * s1 + 0x9176) & 0xFFFF
+  k2 = k1 ^ 0x9176
+  return [
+    None,
+    struct.pack(">HH", k1, s1),
+    struct.pack(">HH", k1, k2),
+    None,
+  ]
+
+def enable(panda, bus, silent=False):
+  if not silent: print("enable", end=' ')
+  panda.can_clear(bus) # flush TX
+  panda.can_clear(0xFFFF) # flush RX
+  keys = None
+  for i, msg in enumerate(ENABLE_MSGS):
+    if len(msg) < 8 and keys and keys[i]:
+      msg += keys[i]
+    panda.can_send(ENABLE_TX_ADDR, msg, bus)
+    if DEBUG: print(f'\n<-- TX: 0x{msg.hex()}')
+    if not silent: print(".", end='', flush=True)
+
+    start = time()
+    resp = None
+    while not resp:
+      msgs = panda.can_recv()
+      for addr, t, dat, src in msgs:
+        if bus != src or ENABLE_RX_ADDR != addr:
+          continue
+        if DEBUG: print(f'\n--> RX: 0x{dat.hex()}')
+        if not silent: print(".", end='', flush=True)
+        if not keys:
+          keys = get_keys(dat[4:8])
+        resp = dat
+      if not resp and len(msgs) == 0:
+        sleep(0.1)
+      if time() - start > 1:
+        if not silent: print("")
+        raise Exception("failed to enable!")
+
+  if not silent: print("")
+
+def disable(panda, bus):
+  if DEBUG: print(f'<-- TX: 0x{DISABLE_MSG.hex()}')
+  panda.can_send(ENABLE_TX_ADDR, DISABLE_MSG, bus)
+
+def activate(panda, bus, silent=False):
+  cmd_send(panda, ACTIVATE_MSG, bus, silent=True)
+  cmd_recv(panda, bus, silent)
+
+def deactivate(panda, bus):
+  cmd_send(panda, DEACTIVATE_MSG, bus, silent=True)
+  # there is no response
+
+def cmd_send(panda, cmd, bus, silent=False):
+  if ECHO and not silent: print(f"+{cmd}")
+  # exit command is fake
+  if cmd.lower() == 'exit':
+    return True
+  cmd = cmd.encode('latin-1') + b'\r'
+  panda.can_clear(bus) # flush TX
+  panda.can_clear(0xFFFF) # flush RX
+  for i in range(0, len(cmd), 8):
+    dat = cmd[i:i+8].ljust(8, b'\x00')
+    if DEBUG: print(f'<-- TX: 0x{dat.hex()}')
+    panda.can_send(TERM_TX_ADDR, dat, bus)
+    # send too fast and the ECU skips messages
+    sleep(0.1)
+  return False
+
+def cmd_recv(panda, bus, silent=False):
+  start = time()
+  result = b''
+  while True:
+    msgs = panda.can_recv()
+    for addr, t, dat, src in msgs:
+      if bus != src or TERM_RX_ADDR != addr:
+        continue
+      start = time()
+      if DEBUG: print(f'\n--> RX: 0x{dat.hex()}')
+      txt = dat.replace(b'\r', b'\r\n').rstrip(b'\x00').decode('latin-1')
+      result += dat.rstrip(b'\x00')
+      if not silent: print(txt, end='')
+      if any(ss in result for ss in [b'\rOK\r', b'\nOK\n', b'Unbekanntes Kommando\r']):
+        if not silent: print('', end='', flush=True)
+        return
+    if len(msgs) == 0:
+      sleep(0.1)
+    if time() - start > 1:
+      if not silent: print("")
+      raise Exception("failed to receive!")
+
+def init(bus, can_speed_kbps, silent=False):
+  f = io.StringIO()
+  with contextlib.redirect_stdout(f):
+    panda = Panda()
+  if not silent: print(f.getvalue())
+  if bus == -1:
+    bus = 1 if panda.has_obd() else 0
+  panda.set_can_speed_kbps(bus, can_speed_kbps)
+  panda.set_safety_mode(Panda.SAFETY_ALLOUTPUT)
+  return panda, bus
+
+def interactive():
+  history = FileHistory(os.path.expanduser('~/.cansh_history'))
+  session = PromptSession(message='> ', history=history)
+
+  while True:
+    cmd = session.prompt()
+    done = cmd_send(panda, cmd, bus)
+    if done: return
+    cmd_recv(panda, bus)
+
+def non_interactive(source):
+    for line in source:
+      cmd = line.rstrip(' \t\r\n')
+      cmd_send(panda, cmd, bus)
+      cmd_recv(panda, bus)
+
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+  parser.add_argument('file', nargs='?', type=argparse.FileType('r'), default=sys.stdin, help="script to run")
+  parser.add_argument('-c', type=str, help='single command to run (then exit)')
+  parser.add_argument('-x', action='store_true', help='echo commands executed')
+  parser.add_argument('-b', type=int, default=-1, help='CAN bus to use')
+  parser.add_argument('-s', type=int, default=500, help='CAN bus speed in kbps')
+  parser.add_argument('-v', action='store_true', default=False, help='verbose output')
+  args = parser.parse_args()
+  is_tty = sys.stdin.isatty() and not args.c
+  ECHO = args.x
+  DEBUG = args.v
+
+  panda, bus = init(args.b, args.s, silent=not is_tty)
+  enable(panda, bus, silent=not is_tty)
+  try:
+    activate(panda, bus, silent=not is_tty)
+    if is_tty:
+      interactive()
+    else:
+      source = [args.c] if args.c else args.file
+      non_interactive(source)
+  finally:
+    try:
+      deactivate(panda, bus)
+    finally:
+      disable(panda, bus)

@@ -1,5 +1,5 @@
-# CAN terminal
-command prompt for automotive ECUs that expose a text-based console over a CAN bus (using a [panda](https://comma.ai/shop/products/panda-obd-ii-dongle))
+# CAN shell
+command processor for automotive ECUs with a built-in text-based CAN bus terminal (using a [panda](https://comma.ai/shop/products/panda-obd-ii-dongle))
 
 [![CAN terminal](https://img.youtube.com/vi/Ouie8a050hs/0.jpg)](https://www.youtube.com/watch?v=Ouie8a050hs)
 
@@ -10,12 +10,22 @@ command prompt for automotive ECUs that expose a text-based console over a CAN b
 pip install -r requirements.txt
 ```
 
-### run
+### interactive shell
 ```
-./canterm.py
+./cansh
 ```
 
-### Supported ECUs
+### single command
+```
+./cansh -c 'rd 0x00000000 1'
+```
+
+### non-interactive
+```
+echo 'rd 0x00000000 1' | ./cansh
+```
+
+## Supported ECUs
 * Honda
   * 2018+ Accord EPS
 * Tesla
