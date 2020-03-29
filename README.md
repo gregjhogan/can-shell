@@ -6,23 +6,33 @@ command processor for automotive ECUs with a built-in text-based CAN bus termina
 ## Usage
 
 ### setup
-```
+```sh
 pip install -r requirements.txt
+sudo ln -s $(pwd)/cansh /usr/local/bin/
 ```
 
 ### interactive shell
-```
-./cansh
+```sh
+cansh
 ```
 
 ### single command
-```
-./cansh -c 'rd 0x00000000 1'
+```sh
+cansh -c 'rd 0x00000000 1'
 ```
 
-### non-interactive
+### non-interactive (pipe)
+```sh
+echo 'rd 0x00000000 1' | cansh
 ```
-echo 'rd 0x00000000 1' | ./cansh
+
+### execute script example.sh (multi-command)
+```sh
+./example.sh
+```
+or
+```sh
+cansh ./example.sh
 ```
 
 ## Supported ECUs
