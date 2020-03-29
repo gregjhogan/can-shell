@@ -26,7 +26,7 @@ cansh -c 'rd 0x00000000 1'
 echo 'rd 0x00000000 1' | cansh
 ```
 
-### execute script example.sh (multi-command)
+### execute script [example.sh](example.sh) (multi-command)
 ```sh
 ./example.sh
 ```
