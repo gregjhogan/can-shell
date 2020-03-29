@@ -1,0 +1,2 @@
+pandacan==0.0.9
+prompt-toolkit==3.0.5
