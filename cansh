@@ -13,6 +13,7 @@ from panda import Panda
 
 ECHO = False
 DEBUG = False
+STOP_ON_ERROR = False
 
 ENABLE_TX_ADDR = 0x75A
 ENABLE_RX_ADDR = 0x75B
@@ -104,9 +105,22 @@ def cmd_send(panda, cmd, bus, silent=False):
     sleep(0.1)
   return False
 
+def normalize_output(output):
+  return output.rstrip(b'\x00').replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+
+def parse_output(output, charset='latin-1'):
+  output = normalize_output(output)
+  lines = output.split(b'\n')
+  partial = lines[-1]
+  done_idx = [i for i, l in enumerate(lines) if l in [b'OK', b'Unbekanntes Kommando']]
+  result = lines[done_idx[0]] != b'OK' if len(done_idx) else None
+  last_idx = done_idx[0] if len(done_idx) and not result else -1
+  text = [l.decode(charset) for l in lines[:last_idx]]
+  return partial, text, result
+
 def cmd_recv(panda, bus, silent=False):
   start = time()
-  result = b''
+  partial_output = b''
   while True:
     msgs = panda.can_recv()
     for addr, t, dat, src in msgs:
@@ -114,12 +128,17 @@ def cmd_recv(panda, bus, silent=False):
         continue
       start = time()
       if DEBUG: print(f'{"" if silent else os.linesep}--> RX: 0x{dat.hex()}')
-      txt = dat.replace(b'\r', b'\r\n').rstrip(b'\x00').decode('latin-1')
-      result += dat.rstrip(b'\x00')
-      if not silent: print(txt, end='')
-      if any(ss in result for ss in [b'\rOK\r', b'\nOK\n', b'Unbekanntes Kommando\r']):
-        if not silent: print('', end='', flush=True)
+      partial_output += dat
+      partial_output, lines, result = parse_output(partial_output)
+      for line in lines:
+        if not silent: print(line)
+      if result is not None:
+        if not silent:
+          sys.stdout.flush()
+        if result and STOP_ON_ERROR:
+          raise Exception("command failed!")
         return
+
     if len(msgs) == 0:
       sleep(0.1)
     if time() - start > 1:
@@ -163,11 +182,12 @@ def non_interactive(source):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('file', nargs='?', type=argparse.FileType('r'), default=sys.stdin, help='script to run')
+  parser.add_argument('-e', action='store_true', help='stop on first error')
   parser.add_argument('-c', metavar='COMMAND', type=str, help='single command to run (then exit)')
   parser.add_argument('-x', action='store_true', help='echo commands executed')
   parser.add_argument('-b', metavar='BUS', type=int, default=-1, help='CAN bus to use')
   parser.add_argument('-s', metavar='SPEED_KBPS', type=int, default=0, help='CAN bus speed in kbps')
-  parser.add_argument('-v', action='store_true', default=False, help='verbose output')
+  parser.add_argument('-v', action='store_true', help='verbose output')
   args = parser.parse_args()
   is_tty = sys.stdin.isatty() and not args.c and args.file.name == '<stdin>'
   ECHO = args.x
@@ -178,8 +198,10 @@ if __name__ == "__main__":
   try:
     activate(panda, bus, silent=not is_tty)
     if is_tty:
+      STOP_ON_ERROR = False
       interactive()
     else:
+      STOP_ON_ERROR = args.e
       source = [args.c] if args.c else args.file
       non_interactive(source)
   finally:
