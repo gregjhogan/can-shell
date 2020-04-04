@@ -15,6 +15,8 @@ ENABLE_TX_ADDR = int(os.getenv('CANTERM_ENABLE_TX_ADDR', 0))
 ENABLE_RX_ADDR = int(os.getenv('CANTERM_ENABLE_RX_ADDR', 0))
 COMMAND_TX_ADDR = int(os.getenv('CANTERM_COMMAND_TX_ADDR', 0))
 COMMAND_RX_ADDR = int(os.getenv('CANTERM_COMMAND_RX_ADDR', 0))
+CAN_BUS = int(os.getenv('CANTERM_BUS', 0))
+SPEED_KBPS = int(os.getenv('CANTERM_SPEED_KBPS', 0))
 
 ECHO = False
 DEBUG = False
@@ -49,8 +51,8 @@ def find_enable_addrs(panda, bus, addr_range):
   for tx_addr in addr_range:
     panda.can_clear(bus) # flush TX
     panda.can_clear(0xFFFF) # flush RX
-    panda.can_send(tx_addr, msg, bus)
     if DEBUG: print(f'\n<-- TX {hex(tx_addr)}: 0x{msg.hex()}')
+    panda.can_send(tx_addr, msg, bus)
     print('.', end='', flush=True)
     start_time = time()
     while time() - start_time < 0.1:
@@ -139,8 +141,8 @@ def enable(panda, bus, tx_addr, rx_addr, silent=False, timeout=1):
   for i, msg in enumerate(ENABLE_MSGS):
     if len(msg) < 8 and keys and keys[i]:
       msg += keys[i]
-    panda.can_send(tx_addr, msg, bus)
     if DEBUG: print(f'{"" if silent else os.linesep}<-- TX {hex(tx_addr)}: 0x{msg.hex()}')
+    panda.can_send(tx_addr, msg, bus)
     if not silent: print(".", end='', flush=True)
 
     start = time()
@@ -162,6 +164,14 @@ def enable(panda, bus, tx_addr, rx_addr, silent=False, timeout=1):
         raise TimeoutError("failed to enable!")
 
   if not silent: print("")
+
+def disable(panda, bus, tx_addr):
+  if DEBUG: print("--- DISABLE")
+  msg = DISABLE_MSG
+  panda.can_clear(bus) # flush TX
+  panda.can_clear(0xFFFF) # flush RX
+  if DEBUG: print(f'<-- TX {hex(tx_addr)}: 0x{msg.hex()}')
+  panda.can_send(tx_addr, msg, bus)
 
 def activate(panda, bus, tx_addr, rx_addr, silent=False):
   if DEBUG: print("--- ACTIVATE")
@@ -270,15 +280,29 @@ if __name__ == "__main__":
   parser.add_argument('-c', metavar='COMMAND', type=str, help='single command to run (then exit)')
   parser.add_argument('-x', action='store_true', help='echo commands executed')
   parser.add_argument('-b', metavar='BUS', type=int, default=-1, help='CAN bus to use')
-  parser.add_argument('-s', metavar='SPEED_KBPS', type=int, default=0, help='CAN bus speed in kbps')
   parser.add_argument('-v', action='store_true', help='verbose output')
+  parser.add_argument('--enable-tx-addr', type=int, default=0, help='enable TX address')
+  parser.add_argument('--enable-rx-addr', type=int, default=0, help='enable RX address')
+  parser.add_argument('--command-tx-addr', type=int, default=0, help='command TX address')
+  parser.add_argument('--command-rx-addr', type=int, default=0, help='command RX address')
+  parser.add_argument('--can-speed', type=int, default=0, help='CAN bus speed in Kbps')
   parser.add_argument('--scan', action='store_true', help='scan for can terminal TX/RX addresses')
   args = parser.parse_args()
   is_tty = sys.stdin.isatty() and not args.c and args.file.name == '<stdin>'
   ECHO = args.x
   DEBUG = args.v
+  if not SPEED_KBPS: SPEED_KBPS = args.can_speed
+  if not CAN_BUS: CAN_BUS = args.b
+  if not ENABLE_TX_ADDR: ENABLE_TX_ADDR = args.enable_tx_addr
+  if not ENABLE_RX_ADDR: ENABLE_RX_ADDR = args.enable_rx_addr
+  if not COMMAND_TX_ADDR: COMMAND_TX_ADDR = args.command_tx_addr
+  if not COMMAND_RX_ADDR: COMMAND_RX_ADDR = args.command_rx_addr
 
-  panda, bus = init(args.b, args.s, silent=not is_tty)
+  if not ENABLE_TX_ADDR or not ENABLE_RX_ADDR or not COMMAND_TX_ADDR or not COMMAND_RX_ADDR:
+    print("You must specify all of the following: ENABLE_TX_ADDR, ENABLE_RX_ADDR, COMMAND_TX_ADDR, COMMAND_RX_ADDR", file=sys.stderr)
+    sys.exit(1)
+
+  panda, bus = init(CAN_BUS, SPEED_KBPS, silent=not is_tty)
   if args.scan:
     find_addrs(panda, bus)
     sys.exit(0)
