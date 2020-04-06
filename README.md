@@ -4,10 +4,17 @@ command processor for automotive ECUs with a built-in text-based CAN bus termina
 [![CAN terminal](https://img.youtube.com/vi/Ouie8a050hs/0.jpg)](https://www.youtube.com/watch?v=Ouie8a050hs)
 
 ## Usage
+note that most vehicles with a gateway block the required addresses, so you need a direct communication line for any of this to work
 
 ### hardware
-currently supported:
+Currently supported:
 * [comma.ai panda](https://comma.ai/shop/products/panda-obd-ii-dongle)
+
+Honda Accord 2018+ EPS connector:
+* [TE 1-967616-1](https://www.te.com/usa-en/product-1-967616-1.html)
+
+Tesla AP1 EPAS connector:
+* [TE 1-967616-1](https://www.te.com/usa-en/product-1-967616-1.html)
 
 ### setup
 ```sh
@@ -28,7 +35,7 @@ export CANTERM_ENABLE_RX_ADDR=1883
 export CANTERM_COMMAND_TX_ADDR=1834
 export CANTERM_COMMAND_RX_ADDR=1835
 ```
-Tesla AP1 EPAS
+Tesla AP1 EPAS (only works if you can figure out how to get it into factory mode)
 ```sh
 export CANTERM_ENABLE_TX_ADDR=1634
 export CANTERM_ENABLE_RX_ADDR=1635
@@ -40,13 +47,13 @@ export CANTERM_COMMAND_RX_ADDR=1637
 ```sh
 # assumes environment variables are set up
 cansh
-# type 'exit' to quit
+# type 'help' to see available commands and 'exit' to quit
 ```
 or (without environment variables)
 ```sh
 # insert appropriate address (decimal) before running below commands
 cansh --enable-tx-addr <enable-tx-addr> --enable-rx-addr <enable-rx-addr> --command-tx-addr <command-tx-addr> --command-rx-addr <command-rx-addr>
-# type 'exit' to quit
+# type 'help' to see available commands and 'exit' to quit
 ```
 
 ### single command

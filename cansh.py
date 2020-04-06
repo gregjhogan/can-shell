@@ -300,7 +300,7 @@ if __name__ == "__main__":
   if not COMMAND_TX_ADDR: COMMAND_TX_ADDR = args.command_tx_addr
   if not COMMAND_RX_ADDR: COMMAND_RX_ADDR = args.command_rx_addr
 
-  if not ENABLE_TX_ADDR or not ENABLE_RX_ADDR or not COMMAND_TX_ADDR or not COMMAND_RX_ADDR:
+  if not args.scan and (not ENABLE_TX_ADDR or not ENABLE_RX_ADDR or not COMMAND_TX_ADDR or not COMMAND_RX_ADDR):
     print("You must specify all of the following: ENABLE_TX_ADDR, ENABLE_RX_ADDR, COMMAND_TX_ADDR, COMMAND_RX_ADDR", file=sys.stderr)
     sys.exit(1)
 
