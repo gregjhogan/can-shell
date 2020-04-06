@@ -18,9 +18,9 @@ COMMAND_RX_ADDR = int(os.getenv('CANTERM_COMMAND_RX_ADDR', 0))
 CAN_BUS = int(os.getenv('CANTERM_BUS', 0))
 SPEED_KBPS = int(os.getenv('CANTERM_SPEED_KBPS', 0))
 
-ECHO = False
-DEBUG = False
-STOP_ON_ERROR = False
+ECHO = int(os.getenv('CANTERM_ECHO', 0))
+DEBUG = int(os.getenv('CANTERM_DEBUG', 0))
+STOP_ON_ERROR = int(os.getenv('CANTERM_STOP_ON_ERROR', 0))
 
 ADDR_SEARCH_RANGE = range(0x600, 0x800)
 
@@ -173,18 +173,17 @@ def disable(panda, bus, tx_addr):
   if DEBUG: print(f'<-- TX {hex(tx_addr)}: 0x{msg.hex()}')
   panda.can_send(tx_addr, msg, bus)
 
-def activate(panda, bus, tx_addr, rx_addr, silent=False):
+def activate(panda, bus, tx_addr, rx_addr):
   if DEBUG: print("--- ACTIVATE")
-  cmd_send(panda, ACTIVATE_MSG, bus, tx_addr, silent=True)
-  cmd_recv(panda, bus, rx_addr, silent)
+  cmd_send(panda, ACTIVATE_MSG, bus, tx_addr)
+  return cmd_recv(panda, bus, rx_addr)
 
 def deactivate(panda, bus, tx_addr):
   if DEBUG: print("--- DEACTIVATE")
-  cmd_send(panda, DEACTIVATE_MSG, bus, tx_addr, silent=True)
+  cmd_send(panda, DEACTIVATE_MSG, bus, tx_addr)
   # there is no response
 
-def cmd_send(panda, cmd, bus, tx_addr, silent=False):
-  if (ECHO or DEBUG) and not silent: print(f"--- {cmd}")
+def cmd_send(panda, cmd, bus, tx_addr):
   # exit command is fake
   if cmd.lower() == 'exit':
     return True
@@ -202,43 +201,49 @@ def cmd_send(panda, cmd, bus, tx_addr, silent=False):
 def normalize_output(output):
   return output.rstrip(b'\x00').replace(b'\r\n', b'\n').replace(b'\r', b'\n')
 
-def parse_output(output, charset='latin-1'):
+def decode_output(lines, stop_on_error, charset='latin-1'):
+  retcode = None
+  text = list()
+  for line in lines:
+    if line == b'OK':
+      retcode = 0
+    elif line == b'Unbekanntes Kommando':
+      retcode = 1
+      if not stop_on_error:
+        text.append("invalid command - type 'help' for valid commands")
+    elif len(line) > 0:
+      text.append(line.decode(charset))
+  return text, retcode
+
+def parse_output(output, stop_on_error):
   output = normalize_output(output)
   lines = output.split(b'\n')
   partial = lines[-1]
-  done_idx = [i for i, l in enumerate(lines) if l in [b'OK', b'Unbekanntes Kommando']]
-  result = lines[done_idx[0]] != b'OK' if len(done_idx) else None
-  last_idx = done_idx[0] if len(done_idx) and not result else -1
-  text = [l.decode(charset) for l in lines[:last_idx]]
-  return partial, text, result
+  text, retcode = decode_output(lines[:-1], stop_on_error)
+  return partial, text, retcode
 
-def cmd_recv(panda, bus, rx_addr, silent=False, timeout=5):
+def cmd_recv(panda, bus, rx_addr, stop_on_error=False, timeout=5):
   start = time()
   partial_output = b''
-  raw = b''
   while True:
     msgs = panda.can_recv()
     for addr, t, dat, src in msgs:
       if bus != src or rx_addr != addr:
         continue
       start = time()
-      if DEBUG: print(f'{"" if silent else os.linesep}--> RX {hex(rx_addr)}: 0x{dat.hex()}')
-      raw += dat
+      if DEBUG: print(f'--> RX {hex(rx_addr)}: 0x{dat.hex()}')
       partial_output += dat
-      partial_output, lines, result = parse_output(partial_output)
-      for line in lines:
-        if not silent: print(line)
-      if result is not None:
-        if not silent:
-          sys.stdout.flush()
-        if result and STOP_ON_ERROR:
+      partial_output, text, retcode = parse_output(partial_output, stop_on_error)
+      for line in text:
+        yield line
+      if retcode is not None:
+        if retcode and stop_on_error:
           raise Exception("command failed!")
-        return raw
+        return
 
     if len(msgs) == 0:
       sleep(0.1)
     if time() - start > timeout:
-      if not silent: print("")
       raise TimeoutError("failed to receive!")
 
 def init(bus, speed_kbps, silent=False):
@@ -261,19 +266,24 @@ def interactive(tx_addr, rx_addr):
 
   while True:
     cmd = session.prompt()
+    if (ECHO or DEBUG): print(f"--- {cmd}")
     done = cmd_send(panda, cmd, bus, tx_addr)
     if done: return
-    cmd_recv(panda, bus, rx_addr)
+    for line in cmd_recv(panda, bus, rx_addr):
+      print(line)
+    sys.stdout.flush()
 
-def non_interactive(source, tx_addr, rx_addr):
+def non_interactive(source, tx_addr, rx_addr, stop_on_error):
     for line in source:
       if line.startswith('#!'):
         continue
       cmd = line.rstrip(' \t\r\n')
       if not cmd:
         continue
+      if (ECHO or DEBUG): print(f"--- {cmd}")
       cmd_send(panda, cmd, bus, tx_addr)
-      cmd_recv(panda, bus, rx_addr)
+      for line in cmd_recv(panda, bus, rx_addr, stop_on_error=stop_on_error):
+        print(line)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -291,8 +301,9 @@ if __name__ == "__main__":
   parser.add_argument('--scan', action='store_true', help='scan for can terminal TX/RX addresses')
   args = parser.parse_args()
   is_tty = sys.stdin.isatty() and not args.c and args.file.name == '<stdin>'
-  ECHO = args.x
-  DEBUG = args.v
+  if not STOP_ON_ERROR: STOP_ON_ERROR = args.e
+  if not ECHO: ECHO = args.x
+  if not DEBUG: DEBUG = args.v
   if not SPEED_KBPS: SPEED_KBPS = args.can_speed
   if not CAN_BUS: CAN_BUS = args.b
   if not ENABLE_TX_ADDR: ENABLE_TX_ADDR = args.enable_tx_addr
@@ -310,14 +321,16 @@ if __name__ == "__main__":
     sys.exit(0)
 
   enable(panda, bus, ENABLE_TX_ADDR, ENABLE_RX_ADDR, silent=not is_tty)
-  activate(panda, bus, COMMAND_TX_ADDR, COMMAND_RX_ADDR, silent=not is_tty)
+  for line in activate(panda, bus, COMMAND_TX_ADDR, COMMAND_RX_ADDR):
+    if is_tty:
+      print(line)
+  sys.stdout.flush()
+
   try:
     if is_tty:
-      STOP_ON_ERROR = False
       interactive(COMMAND_TX_ADDR, COMMAND_RX_ADDR)
     else:
-      STOP_ON_ERROR = args.e
       source = [args.c] if args.c else args.file
-      non_interactive(source, COMMAND_TX_ADDR, COMMAND_RX_ADDR)
+      non_interactive(source, COMMAND_TX_ADDR, COMMAND_RX_ADDR, STOP_ON_ERROR)
   finally:
     deactivate(panda, COMMAND_TX_ADDR, bus)
