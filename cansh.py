@@ -15,6 +15,7 @@ ENABLE_TX_ADDR = int(os.getenv('CANTERM_ENABLE_TX_ADDR', 0))
 ENABLE_RX_ADDR = int(os.getenv('CANTERM_ENABLE_RX_ADDR', 0))
 COMMAND_TX_ADDR = int(os.getenv('CANTERM_COMMAND_TX_ADDR', 0))
 COMMAND_RX_ADDR = int(os.getenv('CANTERM_COMMAND_RX_ADDR', 0))
+FACTORY_MODE_BYPASS = int(os.getenv('CANTERM_FACTORY_MODE_BYPASS', 0))
 CAN_BUS = int(os.getenv('CANTERM_BUS', 0))
 SPEED_KBPS = int(os.getenv('CANTERM_SPEED_KBPS', 0))
 
@@ -31,6 +32,11 @@ ENABLE_MSGS = [
   b'\x41\x00\x00\x00\xAF\xFE\xDE\xAD',
 ]
 DISABLE_MSG = b'\x41\x00\x06\x00\x00\x00\x00\x00'
+
+FACTORY_MODE_MSGS = [
+  b'\x41\x00\x05\x00\x00\x00\x00\x00', # enable
+  b'\x41\x00\x06\x00\x00\x00\x00\x00', # disable
+]
 
 ACTIVATE_MSG = '\x01\x02\x03'
 DEACTIVATE_MSG = '\x01\x02\x10'
@@ -162,6 +168,34 @@ def enable(panda, bus, tx_addr, rx_addr, silent=False, timeout=1):
       if time() - start > timeout:
         if not silent: print("")
         raise TimeoutError("failed to enable!")
+
+  if not silent: print("")
+
+def factory_mode_bypass(panda, bus, tx_addr, rx_addr, silent=False, timeout=1):
+  if DEBUG: print("--- FACTORY MODE BYPASS")
+  if not silent: print("bypass", end=' ')
+  panda.can_clear(bus) # flush TX
+  panda.can_clear(0xFFFF) # flush RX
+  for i, msg in enumerate(FACTORY_MODE_MSGS):
+    if DEBUG: print(f'{"" if silent else os.linesep}<-- TX {hex(tx_addr)}: 0x{msg.hex()}')
+    panda.can_send(tx_addr, msg, bus)
+    if not silent: print(".", end='', flush=True)
+
+    start = time()
+    resp = None
+    while not resp:
+      msgs = panda.can_recv()
+      for addr, t, dat, src in msgs:
+        if bus != src or rx_addr != addr:
+          continue
+        if DEBUG: print(f'{"" if silent else os.linesep}--> RX {hex(rx_addr)}: 0x{dat.hex()}')
+        if not silent: print(".", end='', flush=True)
+        resp = dat
+      if not resp and len(msgs) == 0:
+        sleep(0.1)
+      if time() - start > timeout:
+        if not silent: print("")
+        raise TimeoutError("failed to bypass factory mode!")
 
   if not silent: print("")
 
@@ -297,6 +331,7 @@ if __name__ == "__main__":
   parser.add_argument('--enable-rx-addr', type=int, default=0, help='enable RX address')
   parser.add_argument('--command-tx-addr', type=int, default=0, help='command TX address')
   parser.add_argument('--command-rx-addr', type=int, default=0, help='command RX address')
+  parser.add_argument('--factory-mode-bypass', action='store_true', help='enable then disable factory mode to activate')
   parser.add_argument('--can-speed', type=int, default=0, help='CAN bus speed in Kbps')
   parser.add_argument('--scan', action='store_true', help='scan for can terminal TX/RX addresses')
   args = parser.parse_args()
@@ -310,6 +345,7 @@ if __name__ == "__main__":
   if not ENABLE_RX_ADDR: ENABLE_RX_ADDR = args.enable_rx_addr
   if not COMMAND_TX_ADDR: COMMAND_TX_ADDR = args.command_tx_addr
   if not COMMAND_RX_ADDR: COMMAND_RX_ADDR = args.command_rx_addr
+  if not FACTORY_MODE_BYPASS: FACTORY_MODE_BYPASS = args.factory_mode_bypass
 
   if not args.scan and (not ENABLE_TX_ADDR or not ENABLE_RX_ADDR or not COMMAND_TX_ADDR or not COMMAND_RX_ADDR):
     print("You must specify all of the following: ENABLE_TX_ADDR, ENABLE_RX_ADDR, COMMAND_TX_ADDR, COMMAND_RX_ADDR", file=sys.stderr)
@@ -321,6 +357,8 @@ if __name__ == "__main__":
     sys.exit(0)
 
   enable(panda, bus, ENABLE_TX_ADDR, ENABLE_RX_ADDR, silent=not is_tty)
+  if FACTORY_MODE_BYPASS:
+    factory_mode_bypass(panda, bus, ENABLE_TX_ADDR, ENABLE_RX_ADDR, silent=not is_tty)
   for line in activate(panda, bus, COMMAND_TX_ADDR, COMMAND_RX_ADDR):
     if is_tty:
       print(line)

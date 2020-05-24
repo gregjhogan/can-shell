@@ -35,12 +35,13 @@ export CANTERM_ENABLE_RX_ADDR=1883
 export CANTERM_COMMAND_TX_ADDR=1834
 export CANTERM_COMMAND_RX_ADDR=1835
 ```
-Tesla AP1 EPAS (only works if you can figure out how to get it into factory mode)
+Tesla AP1 EPAS
 ```sh
 export CANTERM_ENABLE_TX_ADDR=1634
 export CANTERM_ENABLE_RX_ADDR=1635
 export CANTERM_COMMAND_TX_ADDR=1636
 export CANTERM_COMMAND_RX_ADDR=1637
+export CANTERM_FACTORY_MODE_BYPASS=1
 ```
 
 ### interactive shell
